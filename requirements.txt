@@ -6,3 +6,4 @@ numpy==2.2.6
 opencv-contrib-python==4.11.0.86
 opencv-python==4.12.0.88
 gunicorn
+scikit-learn==1.7.2
