@@ -25,7 +25,6 @@
             align-items: center;
         }
 
-        /* CHANGED: Target the video element instead of img, and mirror it */
         #video-container video {
             width: 100%;
             height: 100%;
@@ -126,7 +125,7 @@
         async function setupCamera() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "user" }, // Forces front camera on mobile
+                    video: { facingMode: "user" }, 
                     audio: false
                 });
                 video.srcObject = stream;
@@ -139,25 +138,29 @@
         // Step 2: Grab frames locally, compress them, and post them to Flask
         function sendFrameToServer() {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                // Draw current video frame onto hidden HTML5 canvas
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                
-                // Convert frame to compressed base64 image string format
                 const imageData = canvas.toDataURL('image/jpeg', 0.6);
 
-                // Send data payload to backend
                 fetch('/process_frame', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ image: imageData })
                 })
-                .then(res => res.json())
+                .then(async res => {
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || "Unknown Server Error");
+                    return data;
+                })
                 .then(data => {
-                    // Update UI with the AI response
+                    // Display the predicted letter
                     currentLetter.innerText = "Detecting: " + (data.prediction ? data.prediction : "None");
                     textOverlay.innerText = data.accumulated_text ? data.accumulated_text : "___";
                 })
-                .catch(err => console.error("API Error: ", err));
+                .catch(err => {
+                    // IF THERE IS A MATH ERROR IN PYTHON, PRINT IT TO THE SCREEN!
+                    currentLetter.innerText = "Backend Error: " + err.message;
+                    console.error("API Error: ", err);
+                });
             }
         }
 
@@ -168,12 +171,9 @@
             });
         }
 
-        // Initialize camera and start the sending loop
         setupCamera().then(() => {
-            // Process a webcam frame every 150ms
             setInterval(sendFrameToServer, 150);
         });
     </script>
-
 </body>
 </html>
