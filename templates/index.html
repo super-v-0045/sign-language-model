@@ -157,7 +157,7 @@
                     textOverlay.innerText = data.accumulated_text ? data.accumulated_text : "___";
                 })
                 .catch(err => {
-                    // IF THERE IS A MATH ERROR IN PYTHON, PRINT IT TO THE SCREEN!
+                    // IF THERE IS A MATH OR OPENCV ERROR IN PYTHON, PRINT IT TO THE SCREEN!
                     currentLetter.innerText = "Backend Error: " + err.message;
                     console.error("API Error: ", err);
                 });
