@@ -1,3 +1,4 @@
+import os
 import pickle
 import cv2
 import mediapipe as mp
@@ -21,7 +22,7 @@ hands = mp_hands.Hands(
 
 MAX_LEN = 84 
 
-# --- NEW: Global variables for text generation ---
+# --- Global variables for text generation ---
 generated_text = ""
 last_prediction = None
 frames_held = 0
@@ -29,8 +30,25 @@ REQUIRED_FRAMES = 15  # The user must hold the sign for 15 frames (~0.5 seconds)
 
 def generate_frames():
     global generated_text, last_prediction, frames_held
+    
+    # Open local webcam connection
     cap = cv2.VideoCapture(0)
     
+    # IF CAMERA IS NOT FOUND (e.g., Cloud Server environment)
+    if not cap.isOpened():
+        print("Webcam hardware not detected. Streaming empty server canvas.")
+        while True:
+            # Generate a clean black frame as a placeholder on production
+            blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            cv2.putText(blank_frame, "Server Live: Use API or Frontend for Streaming", (30, 240), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+            
+            ret, buffer = cv2.imencode('.jpg', blank_frame)
+            frame_bytes = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+    
+    # IF CAMERA IS FOUND (e.g., Local laptop development)
     while True:
         success, frame = cap.read()
         if not success:
@@ -63,7 +81,7 @@ def generate_frames():
             prediction = model.predict([np.asarray(data_aux)]) 
             predicted_character = str(prediction[0])
 
-            # --- THE FIX: TEXT ACCUMULATION LOGIC ---
+            # --- TEXT ACCUMULATION LOGIC ---
             if predicted_character == last_prediction:
                 frames_held += 1
             else:
@@ -73,8 +91,6 @@ def generate_frames():
             # If the sign has been held consistently for REQUIRED_FRAMES, append it
             if frames_held == REQUIRED_FRAMES:
                 generated_text += predicted_character
-                # We do not reset frames_held here. This prevents it from typing "AA" 
-                # unless the user drops their hand and signs "A" again.
 
             # Display both current sign and the generated word on screen
             cv2.putText(frame, f"Sign: {predicted_character}", (20, 50), 
@@ -83,16 +99,17 @@ def generate_frames():
                         cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 0, 0), 3, cv2.LINE_AA)
         
         else:
-            # If no hands are detected, reset the tracker so the user can type 
-            # the same letter twice in a row by briefly dropping their hands.
+            # If no hands are detected, reset tracker
             last_prediction = None
             frames_held = 0
 
-        # Encode and stream
+        # Encode and stream output
         ret, buffer = cv2.imencode('.jpg', frame)
-        frame = buffer.tobytes()
+        frame_bytes = buffer.tobytes()
         yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+    cap.release()
 
 
 @app.route('/')
@@ -104,16 +121,18 @@ def index():
 def video_feed():
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-# --- NEW: Endpoints to fetch and clear the text from your frontend (JS) ---
+
 @app.route('/get_text')
 def get_text():
     return jsonify({'text': generated_text})
+
 
 @app.route('/clear_text', methods=['POST'])
 def clear_text():
     global generated_text
     generated_text = ""
     return jsonify({'status': 'cleared'})
+
 
 if __name__ == '__main__':
     app.run(debug=True)
