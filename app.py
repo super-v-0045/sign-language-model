@@ -15,8 +15,7 @@ model = None
 mp_hands = None
 hands = None
 
-# IMPORTANT: If you get a "Backend Error: X has 42 features but..." on your screen, 
-# change this MAX_LEN number to 42 instead of 84!
+# IMPORTANT: If your model expects 42 data points instead of 84, change this to 42!
 MAX_LEN = 84 
 
 # --- Global variables for text generation ---
@@ -28,7 +27,8 @@ REQUIRED_FRAMES = 10
 # --- LAZY LOADER: Only runs when the user turns on their camera ---
 def init_ai_models():
     global model, mp_hands, hands
-    if model is None:
+    # Only load if it hasn't been loaded successfully yet
+    if hands is None:
         print("Initializing AI Models for the first time...")
         model_dict = pickle.load(open('model.p', 'rb'))
         model = model_dict['model']
@@ -49,21 +49,22 @@ def index():
 def process_frame():
     global generated_text, last_prediction, frames_held
     
-    # 1. Ensure models are loaded before processing
-    init_ai_models()
-    
     data = request.json
     if not data or 'image' not in data:
         return jsonify({'error': 'No image data received'}), 400
         
     try:
+        # 1. Ensure models are safely loaded INSIDE the error catcher
+        init_ai_models()
+        
+        # 2. Decode the image sent from the user's browser
         header, encoded = data['image'].split(',', 1)
         image_bytes = base64.b64decode(encoded)
         nparr = np.frombuffer(image_bytes, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
         if frame is None:
-            return jsonify({'error': 'Decoding failed'}), 400
+            return jsonify({'error': 'Decoding failed. Check OpenCV installation.'}), 400
 
         data_aux = []
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -83,6 +84,7 @@ def process_frame():
                     data_aux.append(hand_landmarks.landmark[i].x - min(x_))
                     data_aux.append(hand_landmarks.landmark[i].y - min(y_))
 
+            # Pad or truncate the data points to match MAX_LEN
             if len(data_aux) < MAX_LEN:
                 data_aux.extend([0.0] * (MAX_LEN - len(data_aux)))
             else:
@@ -110,7 +112,7 @@ def process_frame():
         })
 
     except Exception as e:
-        # If the model crashes (e.g. wrong number of data points), catch it!
+        # If the AI or OpenCV crashes, send the exact error back to the webpage!
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
