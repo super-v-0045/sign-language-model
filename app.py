@@ -3,16 +3,20 @@ import pickle
 import cv2
 import mediapipe as mp
 import numpy as np
+import traceback
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
-# --- Define AI Variables (Empty at startup) ---
+# --- Define AI Variables (Empty at startup to prevent memory crash) ---
 model = None
 mp_hands = None
 hands = None
+
+# IMPORTANT: If you get a "Backend Error: X has 42 features but..." on your screen, 
+# change this MAX_LEN number to 42 instead of 84!
 MAX_LEN = 84 
 
 # --- Global variables for text generation ---
@@ -21,7 +25,7 @@ last_prediction = None
 frames_held = 0
 REQUIRED_FRAMES = 10  
 
-# --- LAZY LOADER: Only runs on the first frame received ---
+# --- LAZY LOADER: Only runs when the user turns on their camera ---
 def init_ai_models():
     global model, mp_hands, hands
     if model is None:
@@ -84,6 +88,7 @@ def process_frame():
             else:
                 data_aux = data_aux[:MAX_LEN]
 
+            # Predict the sign
             prediction = model.predict([np.asarray(data_aux)]) 
             predicted_character = str(prediction[0])
 
@@ -105,6 +110,8 @@ def process_frame():
         })
 
     except Exception as e:
+        # If the model crashes (e.g. wrong number of data points), catch it!
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/get_text')
