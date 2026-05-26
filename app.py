@@ -1,8 +1,9 @@
+import base64
 import pickle
 import cv2
 import mediapipe as mp
 import numpy as np
-from flask import Flask, render_template, Response, jsonify
+from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
 
@@ -21,93 +22,85 @@ hands = mp_hands.Hands(
 
 MAX_LEN = 84 
 
-# --- NEW: Global variables for text generation ---
+# Global tracking variables
 generated_text = ""
 last_prediction = None
 frames_held = 0
-REQUIRED_FRAMES = 15  # The user must hold the sign for 15 frames (~0.5 seconds) to type a letter
-
-def generate_frames():
-    global generated_text, last_prediction, frames_held
-    cap = cv2.VideoCapture(0)
-    
-    while True:
-        success, frame = cap.read()
-        if not success:
-            break
-        
-        data_aux = []
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = hands.process(frame_rgb)
-
-        if results.multi_hand_landmarks:
-            for hand_landmarks in results.multi_hand_landmarks:
-                x_ = []
-                y_ = []
-                
-                mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-
-                for i in range(len(hand_landmarks.landmark)):
-                    x_.append(hand_landmarks.landmark[i].x)
-                    y_.append(hand_landmarks.landmark[i].y)
-
-                for i in range(len(hand_landmarks.landmark)):
-                    data_aux.append(hand_landmarks.landmark[i].x - min(x_))
-                    data_aux.append(hand_landmarks.landmark[i].y - min(y_))
-
-            if len(data_aux) < MAX_LEN:
-                data_aux.extend([0.0] * (MAX_LEN - len(data_aux)))
-            else:
-                data_aux = data_aux[:MAX_LEN]
-
-            prediction = model.predict([np.asarray(data_aux)]) 
-            predicted_character = str(prediction[0])
-
-            # --- THE FIX: TEXT ACCUMULATION LOGIC ---
-            if predicted_character == last_prediction:
-                frames_held += 1
-            else:
-                frames_held = 0
-                last_prediction = predicted_character
-
-            # If the sign has been held consistently for REQUIRED_FRAMES, append it
-            if frames_held == REQUIRED_FRAMES:
-                generated_text += predicted_character
-                # We do not reset frames_held here. This prevents it from typing "AA" 
-                # unless the user drops their hand and signs "A" again.
-
-            # Display both current sign and the generated word on screen
-            cv2.putText(frame, f"Sign: {predicted_character}", (20, 50), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
-            cv2.putText(frame, f"Text: {generated_text}", (20, 100), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 0, 0), 3, cv2.LINE_AA)
-        
-        else:
-            # If no hands are detected, reset the tracker so the user can type 
-            # the same letter twice in a row by briefly dropping their hands.
-            last_prediction = None
-            frames_held = 0
-
-        # Encode and stream
-        ret, buffer = cv2.imencode('.jpg', frame)
-        frame = buffer.tobytes()
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-
+REQUIRED_FRAMES = 15 
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
+@app.route('/process_frame', methods=['POST'])
+def process_frame():
+    global generated_text, last_prediction, frames_held
+    
+    # Receive the base64 image from the browser
+    data = request.json
+    image_data = data['image'].split(",")[1]
+    
+    # Decode base64 back into an OpenCV image matrix
+    nparr = np.frombuffer(base64.b64decode(image_data), np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    
+    # Mirroring the frame horizontally makes it feel like looking in a mirror
+    frame = cv2.flip(frame, 1)
 
-@app.route('/video_feed')
-def video_feed():
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    data_aux = []
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = hands.process(frame_rgb)
+    predicted_character = ""
 
-# --- NEW: Endpoints to fetch and clear the text from your frontend (JS) ---
-@app.route('/get_text')
-def get_text():
-    return jsonify({'text': generated_text})
+    if results.multi_hand_landmarks:
+        for hand_landmarks in results.multi_hand_landmarks:
+            x_ = []
+            y_ = []
+            
+            mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+
+            for i in range(len(hand_landmarks.landmark)):
+                x_.append(hand_landmarks.landmark[i].x)
+                y_.append(hand_landmarks.landmark[i].y)
+
+            for i in range(len(hand_landmarks.landmark)):
+                data_aux.append(hand_landmarks.landmark[i].x - min(x_))
+                data_aux.append(hand_landmarks.landmark[i].y - min(y_))
+
+        if len(data_aux) < MAX_LEN:
+            data_aux.extend([0.0] * (MAX_LEN - len(data_aux)))
+        else:
+            data_aux = data_aux[:MAX_LEN]
+
+        # Predict sign
+        prediction = model.predict([np.asarray(data_aux)]) 
+        predicted_character = str(prediction[0])
+
+        # Text accumulation logic
+        if predicted_character == last_prediction:
+            frames_held += 1
+        else:
+            frames_held = 0
+            last_prediction = predicted_character
+
+        if frames_held == REQUIRED_FRAMES:
+            generated_text += predicted_character
+    else:
+        last_prediction = None
+        frames_held = 0
+
+    # Draw current live text onto the frame before returning it
+    cv2.putText(frame, f"Sign: {predicted_character if predicted_character else 'None'}", (20, 50), 
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+
+    # Encode processed image back to base64 string to send back to client
+    _, buffer = cv2.imencode('.jpg', frame)
+    jpg_as_text = base64.b64encode(buffer).decode('utf-8')
+
+    return jsonify({
+        'processed_image': f"data:image/jpeg;base64,{jpg_as_text}",
+        'text': generated_text
+    })
 
 @app.route('/clear_text', methods=['POST'])
 def clear_text():
