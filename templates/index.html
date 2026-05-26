@@ -25,12 +25,11 @@
             align-items: center;
         }
 
-        #video-container video {
+        #video-container img {
             width: 100%;
             height: 100%;
             object-fit: cover; 
             display: block;
-            transform: scaleX(-1);
         }
 
         /* --- BOTTOM UI PANEL --- */
@@ -39,8 +38,9 @@
             bottom: 0;
             left: 0;
             width: 100%;
+            /* Gradient makes text readable over the video */
             background: linear-gradient(transparent, rgba(0,0,0,0.8) 20%, rgba(0,0,0,1));
-            padding-bottom: env(safe-area-inset-bottom);
+            padding-bottom: env(safe-area-inset-bottom); /* Better for iPhones */
             z-index: 20;
             display: flex;
             flex-direction: column;
@@ -48,6 +48,7 @@
             padding-top: 40px;
         }
 
+        /* The detected sentence display */
         #text-overlay {
             color: #00FF00;
             font-size: 1.8rem;
@@ -56,13 +57,8 @@
             min-height: 2rem;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
         }
-        
-        .current-letter {
-            color: #ffcc00;
-            font-size: 1rem;
-            margin-bottom: 10px;
-        }
 
+        /* The Title now at the bottom */
         h1 {
             margin: 0;
             padding: 10px 0 20px 0;
@@ -73,9 +69,10 @@
             text-transform: uppercase;
         }
 
+        /* Visual guide for the detection zone (Middle-Bottom) */
         #detection-zone-guide {
             position: absolute;
-            bottom: 15%; 
+            bottom: 15%; /* Lifted slightly to stay above the text */
             left: 20%;
             width: 60%;
             height: 40%;
@@ -84,96 +81,41 @@
             pointer-events: none;
             z-index: 10;
         }
-
-        .clear-btn {
-            background: rgba(255,255,255,0.2);
-            border: 1px solid rgba(255,255,255,0.5);
-            color: white;
-            padding: 5px 15px;
-            border-radius: 20px;
-            cursor: pointer;
-            margin-bottom: 10px;
-            transition: 0.2s;
-        }
-        .clear-btn:hover { background: rgba(255,255,255,0.4); }
     </style>
 </head>
 <body>
 
     <div id="video-container">
-        <video id="webcam" autoplay playsinline></video>
-        <canvas id="captureCanvas" width="640" height="480" style="display:none;"></canvas>
+        <!-- The camera feed -->
+        <img src="{{ url_for('video_feed') }}" alt="Video Feed">
 
+        <!-- The visual guide for hand placement -->
         <div id="detection-zone-guide"></div>
 
+        <!-- Grouped Text and Title at the bottom -->
         <div class="bottom-ui">
-            <div class="current-letter" id="current-letter">Detecting: None</div>
-            <div id="text-overlay">___</div>
-            <button class="clear-btn" onclick="clearText()">Clear Text</button>
+            <div id="text-overlay">Waiting...</div>
             <h1>Live Sign Language Detection</h1>
         </div>
     </div>
 
     <script>
-        const video = document.getElementById('webcam');
-        const canvas = document.getElementById('captureCanvas');
-        const ctx = canvas.getContext('2d');
-        const textOverlay = document.getElementById('text-overlay');
-        const currentLetter = document.getElementById('current-letter');
-
-        // Step 1: Request access to the user's hardware webcam
-        async function setupCamera() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "user" }, 
-                    audio: false
-                });
-                video.srcObject = stream;
-            } catch (err) {
-                alert("Camera access denied or unavailable. Please allow camera permissions.");
-                console.error(err);
-            }
-        }
-
-        // Step 2: Grab frames locally, compress them, and post them to Flask
-        function sendFrameToServer() {
-            if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const imageData = canvas.toDataURL('image/jpeg', 0.6);
-
-                fetch('/process_frame', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ image: imageData })
-                })
-                .then(async res => {
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.error || "Unknown Server Error");
-                    return data;
-                })
+        // Poll the backend for the generated text string
+        function updateText() {
+            fetch('/get_text')
+                .then(res => res.json())
                 .then(data => {
-                    // Display the predicted letter
-                    currentLetter.innerText = "Detecting: " + (data.prediction ? data.prediction : "None");
-                    textOverlay.innerText = data.accumulated_text ? data.accumulated_text : "___";
+                    const el = document.getElementById('text-overlay');
+                    if (data.text) {
+                        el.innerText = data.text;
+                    } else {
+                        el.innerText = "___";
+                    }
                 })
-                .catch(err => {
-                    // IF THERE IS A MATH OR OPENCV ERROR IN PYTHON, PRINT IT TO THE SCREEN!
-                    currentLetter.innerText = "Backend Error: " + err.message;
-                    console.error("API Error: ", err);
-                });
-            }
+                .catch(err => console.error("Text fetch error:", err));
         }
-
-        function clearText() {
-            fetch('/clear_text', { method: 'POST' })
-            .then(() => {
-                textOverlay.innerText = "___";
-            });
-        }
-
-        setupCamera().then(() => {
-            setInterval(sendFrameToServer, 150);
-        });
+        setInterval(updateText, 500);
     </script>
+
 </body>
 </html>
