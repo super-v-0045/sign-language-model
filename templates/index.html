@@ -100,60 +100,63 @@
         </div>
     </div>
 
-    <script>
-        const video = document.getElementById('webcam');
-        const canvas = document.getElementById('capture-canvas');
-        const outputImg = document.getElementById('output-frame');
-        const textOverlay = document.getElementById('text-overlay');
-        const ctx = canvas.getContext('2d');
+   <script>
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('capture-canvas');
+    const outputImg = document.getElementById('output-frame');
+    const textOverlay = document.getElementById('text-overlay');
+    const ctx = canvas.getContext('2d');
 
-        // Request browser webcam access
-        navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
-            .then(stream => {
-                video.srcObject = stream;
-                // Once stream metadata loads, match canvas sizes to video scale
-                video.onloadedmetadata = () => {
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    // Start processing loop
-                    sendFrameLoop();
-                };
-            })
-            .catch(err => {
-                console.error("Webcam access denied: ", err);
-                textOverlay.innerText = "Camera Access Error";
-            });
+    let isProcessing = false; // Flag to prevent multi-request overlapping
 
-        function sendFrameLoop() {
-            // Draw current frame from hidden <video> onto the hidden <canvas>
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    navigator.mediaDevices.getUserMedia({ 
+        video: { width: { ideal: 480 }, height: { ideal: 360 } } // Slightly smaller for faster uploads
+    })
+    .then(stream => {
+        video.srcObject = stream;
+        video.play();
+        video.addEventListener('playing', () => {
+            canvas.width = video.videoWidth || 480;
+            canvas.height = video.videoHeight || 360;
             
-            // Extract frame as a base64 DataURL string
-            const frameData = canvas.toDataURL('image/jpeg', 0.6); // 0.6 compresses it for speed
+            // Loop runs every 100ms (10 frames per second), perfect for live sign detection
+            setInterval(sendFrame, 100); 
+        });
+    })
+    .catch(err => {
+        console.error("Webcam access error: ", err);
+        textOverlay.innerText = "Camera access denied or unavailable.";
+    });
 
-            // POST the frame payload straight to Flask
-            fetch('/process_frame', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image: frameData })
-            })
-            .then(res => res.json())
-            .then(data => {
-                // Render the annotated image directly back to the display image element
-                if(data.processed_image) outputImg.src = data.processed_image;
-                
-                // Update text overlays
-                textOverlay.innerText = data.text ? data.text : "___";
-                
-                // Trigger immediate next frame evaluation loop
-                requestAnimationFrame(sendFrameLoop);
-            })
-            .catch(err => {
-                console.error("Server communication error:", err);
-                // Try again after 1 second if server encounters a momentary drop
-                setTimeout(sendFrameLoop, 1000);
-            });
-        }
-    </script>
+    function sendFrame() {
+        // If the server is still processing the previous frame, skip this interval cycle
+        if (isProcessing || video.paused || video.ended) return;
+
+        isProcessing = true; // Lock the loop
+
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const frameData = canvas.toDataURL('image/jpeg', 0.4); // Compress image quality to 40% for speed
+
+        fetch('/process_frame', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: frameData })
+        })
+        .then(res => {
+            if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
+            return res.json();
+        })
+        .then(data => {
+            if (data.processed_image) outputImg.src = data.processed_image;
+            textOverlay.innerText = data.text ? data.text : "___";
+        })
+        .catch(err => {
+            console.error("Frame skip or network lag:", err);
+        })
+        .finally(() => {
+            isProcessing = false; // Unlock and clear for the next frame
+        });
+    }
+</script>
 </body>
 </html>
