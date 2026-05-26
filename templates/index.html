@@ -25,22 +25,21 @@
             align-items: center;
         }
 
-        #video-container img {
+        /* Displays the processed frames received back from Python */
+        #output-frame {
             width: 100%;
             height: 100%;
             object-fit: cover; 
             display: block;
         }
 
-        /* --- BOTTOM UI PANEL --- */
         .bottom-ui {
             position: absolute;
             bottom: 0;
             left: 0;
             width: 100%;
-            /* Gradient makes text readable over the video */
             background: linear-gradient(transparent, rgba(0,0,0,0.8) 20%, rgba(0,0,0,1));
-            padding-bottom: env(safe-area-inset-bottom); /* Better for iPhones */
+            padding-bottom: env(safe-area-inset-bottom); 
             z-index: 20;
             display: flex;
             flex-direction: column;
@@ -48,7 +47,6 @@
             padding-top: 40px;
         }
 
-        /* The detected sentence display */
         #text-overlay {
             color: #00FF00;
             font-size: 1.8rem;
@@ -58,7 +56,6 @@
             text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
         }
 
-        /* The Title now at the bottom */
         h1 {
             margin: 0;
             padding: 10px 0 20px 0;
@@ -69,10 +66,9 @@
             text-transform: uppercase;
         }
 
-        /* Visual guide for the detection zone (Middle-Bottom) */
         #detection-zone-guide {
             position: absolute;
-            bottom: 15%; /* Lifted slightly to stay above the text */
+            bottom: 15%; 
             left: 20%;
             width: 60%;
             height: 40%;
@@ -81,41 +77,83 @@
             pointer-events: none;
             z-index: 10;
         }
+
+        /* Keep the raw camera feed hidden */
+        video, canvas {
+            display: none;
+        }
     </style>
 </head>
 <body>
 
     <div id="video-container">
-        <!-- The camera feed -->
-        <img src="{{ url_for('video_feed') }}" alt="Video Feed">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="capture-canvas"></canvas>
 
-        <!-- The visual guide for hand placement -->
+        <img id="output-frame" alt="Initializing camera stream...">
+
         <div id="detection-zone-guide"></div>
 
-        <!-- Grouped Text and Title at the bottom -->
         <div class="bottom-ui">
-            <div id="text-overlay">Waiting...</div>
+            <div id="text-overlay">Waiting for video...</div>
             <h1>Live Sign Language Detection</h1>
         </div>
     </div>
 
     <script>
-        // Poll the backend for the generated text string
-        function updateText() {
-            fetch('/get_text')
-                .then(res => res.json())
-                .then(data => {
-                    const el = document.getElementById('text-overlay');
-                    if (data.text) {
-                        el.innerText = data.text;
-                    } else {
-                        el.innerText = "___";
-                    }
-                })
-                .catch(err => console.error("Text fetch error:", err));
-        }
-        setInterval(updateText, 500);
-    </script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('capture-canvas');
+        const outputImg = document.getElementById('output-frame');
+        const textOverlay = document.getElementById('text-overlay');
+        const ctx = canvas.getContext('2d');
 
+        // Request browser webcam access
+        navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
+            .then(stream => {
+                video.srcObject = stream;
+                // Once stream metadata loads, match canvas sizes to video scale
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    // Start processing loop
+                    sendFrameLoop();
+                };
+            })
+            .catch(err => {
+                console.error("Webcam access denied: ", err);
+                textOverlay.innerText = "Camera Access Error";
+            });
+
+        function sendFrameLoop() {
+            // Draw current frame from hidden <video> onto the hidden <canvas>
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Extract frame as a base64 DataURL string
+            const frameData = canvas.toDataURL('image/jpeg', 0.6); // 0.6 compresses it for speed
+
+            // POST the frame payload straight to Flask
+            fetch('/process_frame', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: frameData })
+            })
+            .then(res => res.json())
+            .then(data => {
+                // Render the annotated image directly back to the display image element
+                if(data.processed_image) outputImg.src = data.processed_image;
+                
+                // Update text overlays
+                textOverlay.innerText = data.text ? data.text : "___";
+                
+                // Trigger immediate next frame evaluation loop
+                requestAnimationFrame(sendFrameLoop);
+            })
+            .catch(err => {
+                console.error("Server communication error:", err);
+                // Try again after 1 second if server encounters a momentary drop
+                setTimeout(sendFrameLoop, 1000);
+            });
+        }
+    </script>
 </body>
 </html>
