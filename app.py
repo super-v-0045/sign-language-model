@@ -70,6 +70,9 @@ def process_frame():
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = hands.process(frame_rgb)
         predicted_character = ""
+        
+        # ADDED: Array to track landmark mapping coordinates for the frontend canvas
+        landmarks_to_draw = []
 
         if results.multi_hand_landmarks:
             for hand_landmarks in results.multi_hand_landmarks:
@@ -79,6 +82,12 @@ def process_frame():
                 for i in range(len(hand_landmarks.landmark)):
                     x_.append(hand_landmarks.landmark[i].x)
                     y_.append(hand_landmarks.landmark[i].y)
+                    
+                    # ADDED: Log current raw coordinates to draw lines on HTML later
+                    landmarks_to_draw.append({
+                        'x': hand_landmarks.landmark[i].x,
+                        'y': hand_landmarks.landmark[i].y
+                    })
 
                 for i in range(len(hand_landmarks.landmark)):
                     data_aux.append(hand_landmarks.landmark[i].x - min(x_))
@@ -106,9 +115,11 @@ def process_frame():
             last_prediction = None
             frames_held = 0
 
+        # CHANGED: Hand over both prediction data AND visual layout lines to client-side JS
         return jsonify({
             'prediction': predicted_character,
-            'accumulated_text': generated_text
+            'accumulated_text': generated_text,
+            'landmarks': landmarks_to_draw
         })
 
     except Exception as e:
