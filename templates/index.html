@@ -26,25 +26,22 @@
             background-color: #000;
         }
 
-        /* Displays the processed frames received back from Python */
         #output-frame {
             width: 100%;
             height: 100%;
             object-fit: cover; 
             display: block;
             position: relative;
-            z-index: 5; /* Forces video layer above the black background */
+            z-index: 5;
         }
 
-        /* --- BOTTOM UI PANEL --- */
         .bottom-ui {
             position: absolute;
             bottom: 0;
             left: 0;
             width: 100%;
-            /* Gradient makes text readable over the video */
             background: linear-gradient(transparent, rgba(0,0,0,0.8) 20%, rgba(0,0,0,1));
-            padding-bottom: env(safe-area-inset-bottom); /* Better for mobile notches */
+            padding-bottom: env(safe-area-inset-bottom);
             z-index: 20;
             display: flex;
             flex-direction: column;
@@ -52,7 +49,6 @@
             padding-top: 40px;
         }
 
-        /* The detected sentence display */
         #text-overlay {
             color: #00FF00;
             font-size: 1.8rem;
@@ -63,7 +59,6 @@
             text-align: center;
         }
 
-        /* The Title at the bottom */
         h1 {
             margin: 0;
             padding: 10px 0 20px 0;
@@ -74,10 +69,9 @@
             text-transform: uppercase;
         }
 
-        /* Visual guide for the detection zone */
         #detection-zone-guide {
             position: absolute;
-            bottom: 25%; /* Adjusted up to sit cleanly in the view center */
+            bottom: 25%;
             left: 15%;
             width: 70%;
             height: 45%;
@@ -87,7 +81,6 @@
             z-index: 10;
         }
 
-        /* Hidden raw assets utilized to pipe data behind the scenes */
         video, canvas {
             display: none;
         }
@@ -98,7 +91,6 @@
     <div id="video-container">
         <video id="webcam" autoplay playsinline muted></video>
         <canvas id="capture-canvas"></canvas>
-
         <img id="output-frame" alt="Initializing camera stream...">
 
         <div id="detection-zone-guide"></div>
@@ -118,7 +110,7 @@
 
         let isProcessing = false;
 
-        // Force a lightweight streaming profile to keep network payloads small
+        // Start local webcam hardware stream
         navigator.mediaDevices.getUserMedia({ 
             video: { 
                 width: { ideal: 426 }, 
@@ -129,29 +121,34 @@
         .then(stream => {
             video.srcObject = stream;
             video.play();
+            
             video.addEventListener('playing', () => {
-                // FORCE downscaled internal canvas tracking boundaries (Crucial for Render limits)
+                // Set lightweight dimensions to ensure packet stays well under Render's 1MB firewall payload cap
                 canvas.width = 320;
                 canvas.height = 240;
                 
-                // Interval set to 200ms (5 frames a second) to prevent network congestion
-                setInterval(sendFrame, 200); 
+                // Continuous loop execution triggers request processing engine blocks smoothly
+                tickLoop(); 
             });
         })
         .catch(err => {
             console.error("Webcam blocked:", err);
-            textOverlay.innerText = "Camera access denied.";
+            textOverlay.style.color = "#FF0000";
+            textOverlay.innerText = "Camera Access Blocked or Denied.";
         });
 
-        function sendFrame() {
-            if (isProcessing || video.paused || video.ended) return;
-            isProcessing = true;
+        function tickLoop() {
+            // Safety drop logic checks if frame extraction sequence is locked or camera went sleep
+            if (isProcessing || video.paused || video.ended) {
+                setTimeout(tickLoop, 50); // Pause briefly before checking queue states again
+                return;
+            }
 
-            // Draw and compress the video frame down to the 320x240 canvas size
+            isProcessing = true; // Engage processing execution request lock
+
+            // Extract bounding coordinates to invisible memory canvas
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            // Extract lightweight 30% quality JPEG compression payload string (~30KB - 50KB total)
-            const frameData = canvas.toDataURL('image/jpeg', 0.3); 
+            const frameData = canvas.toDataURL('image/jpeg', 0.35); // 35% compression quality keeping size at ~35KB
 
             fetch('/process_frame', {
                 method: 'POST',
@@ -159,20 +156,26 @@
                 body: JSON.stringify({ image: frameData })
             })
             .then(res => {
-                if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
+                if (!res.ok) throw new Error(`HTTP System Error: ${res.status}`);
                 return res.json();
             })
             .then(data => {
+                // Confirm backend returned real frame arrays
                 if (data.processed_image && data.processed_image !== "data:image/jpeg;base64,") {
                     outputImg.src = data.processed_image;
                 }
                 textOverlay.innerText = data.text ? data.text : "___";
+                
+                // Fire next execution sequence IMMEDIATELY since previous frame cleared safely
+                isProcessing = false;
+                setTimeout(tickLoop, 30); 
             })
             .catch(err => {
-                console.error("Network sync drop:", err);
-            })
-            .finally(() => {
+                console.error("Transmission skip encountered:", err);
+                
+                // On error, wait 1 second to give your network buffer space to breathe before retrying
                 isProcessing = false;
+                setTimeout(tickLoop, 1000); 
             });
         }
     </script>
