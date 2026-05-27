@@ -155,7 +155,7 @@
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             
             // Extract matrix data into compressed JPEG text data string
-            const frameData = canvas.toToDataURL ? canvas.toDataURL('image/jpeg', 0.4) : canvas.toDataURL('image/jpeg', 0.4);
+            const frameData = canvas.toDataURL('image/jpeg', 0.4);
 
             // POST image payload to Flask API endpoint
             fetch('/process_frame', {
