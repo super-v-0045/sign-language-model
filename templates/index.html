@@ -23,6 +23,7 @@
             display: flex;
             justify-content: center;
             align-items: center;
+            background-color: #000;
         }
 
         /* Displays the processed frames received back from Python */
@@ -31,15 +32,19 @@
             height: 100%;
             object-fit: cover; 
             display: block;
+            position: relative;
+            z-index: 5; /* Forces video layer above the black background */
         }
 
+        /* --- BOTTOM UI PANEL --- */
         .bottom-ui {
             position: absolute;
             bottom: 0;
             left: 0;
             width: 100%;
+            /* Gradient makes text readable over the video */
             background: linear-gradient(transparent, rgba(0,0,0,0.8) 20%, rgba(0,0,0,1));
-            padding-bottom: env(safe-area-inset-bottom); 
+            padding-bottom: env(safe-area-inset-bottom); /* Better for mobile notches */
             z-index: 20;
             display: flex;
             flex-direction: column;
@@ -47,6 +52,7 @@
             padding-top: 40px;
         }
 
+        /* The detected sentence display */
         #text-overlay {
             color: #00FF00;
             font-size: 1.8rem;
@@ -54,8 +60,10 @@
             margin-bottom: 5px;
             min-height: 2rem;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            text-align: center;
         }
 
+        /* The Title at the bottom */
         h1 {
             margin: 0;
             padding: 10px 0 20px 0;
@@ -66,19 +74,20 @@
             text-transform: uppercase;
         }
 
+        /* Visual guide for the detection zone */
         #detection-zone-guide {
             position: absolute;
-            bottom: 15%; 
-            left: 20%;
-            width: 60%;
-            height: 40%;
-            border: 2px dashed rgba(255, 255, 255, 0.3);
+            bottom: 25%; /* Adjusted up to sit cleanly in the view center */
+            left: 15%;
+            width: 70%;
+            height: 45%;
+            border: 2px dashed rgba(255, 255, 255, 0.4);
             border-radius: 15px;
             pointer-events: none;
             z-index: 10;
         }
 
-        /* Keep the raw camera feed hidden */
+        /* Hidden raw assets utilized to pipe data behind the scenes */
         video, canvas {
             display: none;
         }
@@ -87,7 +96,7 @@
 <body>
 
     <div id="video-container">
-        <video id="webcam" autoplay playsinline></video>
+        <video id="webcam" autoplay playsinline muted></video>
         <canvas id="capture-canvas"></canvas>
 
         <img id="output-frame" alt="Initializing camera stream...">
@@ -100,63 +109,80 @@
         </div>
     </div>
 
-   <script>
-    const video = document.getElementById('webcam');
-    const canvas = document.getElementById('capture-canvas');
-    const outputImg = document.getElementById('output-frame');
-    const textOverlay = document.getElementById('text-overlay');
-    const ctx = canvas.getContext('2d');
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('capture-canvas');
+        const outputImg = document.getElementById('output-frame');
+        const textOverlay = document.getElementById('text-overlay');
+        const ctx = canvas.getContext('2d');
 
-    let isProcessing = false; // Flag to prevent multi-request overlapping
+        let isProcessing = false; // Synchronous flag lock
 
-    navigator.mediaDevices.getUserMedia({ 
-        video: { width: { ideal: 480 }, height: { ideal: 360 } } // Slightly smaller for faster uploads
-    })
-    .then(stream => {
-        video.srcObject = stream;
-        video.play();
-        video.addEventListener('playing', () => {
-            canvas.width = video.videoWidth || 480;
-            canvas.height = video.videoHeight || 360;
+        // Request browser webcam access with performance optimized resolution constraints
+        navigator.mediaDevices.getUserMedia({ 
+            video: { 
+                width: { ideal: 480 }, 
+                height: { ideal: 360 },
+                facingMode: "user"
+            } 
+        })
+        .then(stream => {
+            video.srcObject = stream;
+            video.play();
             
-            // Loop runs every 100ms (10 frames per second), perfect for live sign detection
-            setInterval(sendFrame, 100); 
-        });
-    })
-    .catch(err => {
-        console.error("Webcam access error: ", err);
-        textOverlay.innerText = "Camera access denied or unavailable.";
-    });
-
-    function sendFrame() {
-        // If the server is still processing the previous frame, skip this interval cycle
-        if (isProcessing || video.paused || video.ended) return;
-
-        isProcessing = true; // Lock the loop
-
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const frameData = canvas.toDataURL('image/jpeg', 0.4); // Compress image quality to 40% for speed
-
-        fetch('/process_frame', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image: frameData })
-        })
-        .then(res => {
-            if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
-            return res.json();
-        })
-        .then(data => {
-            if (data.processed_image) outputImg.src = data.processed_image;
-            textOverlay.innerText = data.text ? data.text : "___";
+            // Listen for active pixel runtime ignition 
+            video.addEventListener('playing', () => {
+                canvas.width = video.videoWidth || 480;
+                canvas.height = video.videoHeight || 360;
+                
+                // Triggers frame dispatches systematically every 100ms (~10 FPS)
+                setInterval(sendFrame, 100); 
+            });
         })
         .catch(err => {
-            console.error("Frame skip or network lag:", err);
-        })
-        .finally(() => {
-            isProcessing = false; // Unlock and clear for the next frame
+            console.error("Webcam access denied: ", err);
+            textOverlay.style.color = "#FF0000";
+            textOverlay.innerText = "Camera Access Blocked. Check Permissions.";
         });
-    }
-</script>
+
+        function sendFrame() {
+            // Drop interval cycle execution if client stream stalls or previous request is pending
+            if (isProcessing || video.paused || video.ended) return;
+
+            isProcessing = true; // Engage execution lock
+
+            // Render current mirror context snapshot straight to background memory canvas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Extract matrix data into compressed JPEG text data string
+            const frameData = canvas.toToDataURL ? canvas.toDataURL('image/jpeg', 0.4) : canvas.toDataURL('image/jpeg', 0.4);
+
+            // POST image payload to Flask API endpoint
+            fetch('/process_frame', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: frameData })
+            })
+            .then(res => {
+                if (!res.ok) throw new Error(`HTTP Error Status: ${res.status}`);
+                return res.json();
+            })
+            .then(data => {
+                // Safeguard against updating the element source with empty fallback data strings
+                if (data.processed_image && data.processed_image !== "data:image/jpeg;base64,") {
+                    outputImg.src = data.processed_image;
+                }
+                
+                // Update live predictive text layout
+                textOverlay.innerText = data.text ? data.text : "___";
+            })
+            .catch(err => {
+                console.error("Transmission skip:", err);
+            })
+            .finally(() => {
+                isProcessing = false; // Disengage request system lock
+            });
+        }
+    </script>
 </body>
 </html>
