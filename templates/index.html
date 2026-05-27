@@ -116,71 +116,63 @@
         const textOverlay = document.getElementById('text-overlay');
         const ctx = canvas.getContext('2d');
 
-        let isProcessing = false; // Synchronous flag lock
+        let isProcessing = false;
 
-        // Request browser webcam access with performance optimized resolution constraints
+        // Force a lightweight streaming profile to keep network payloads small
         navigator.mediaDevices.getUserMedia({ 
             video: { 
-                width: { ideal: 480 }, 
-                height: { ideal: 360 },
+                width: { ideal: 426 }, 
+                height: { ideal: 240 },
                 facingMode: "user"
             } 
         })
         .then(stream => {
             video.srcObject = stream;
             video.play();
-            
-            // Listen for active pixel runtime ignition 
             video.addEventListener('playing', () => {
-                canvas.width = video.videoWidth || 480;
-                canvas.height = video.videoHeight || 360;
+                // FORCE downscaled internal canvas tracking boundaries (Crucial for Render limits)
+                canvas.width = 320;
+                canvas.height = 240;
                 
-                // Triggers frame dispatches systematically every 100ms (~10 FPS)
-                setInterval(sendFrame, 100); 
+                // Interval set to 200ms (5 frames a second) to prevent network congestion
+                setInterval(sendFrame, 200); 
             });
         })
         .catch(err => {
-            console.error("Webcam access denied: ", err);
-            textOverlay.style.color = "#FF0000";
-            textOverlay.innerText = "Camera Access Blocked. Check Permissions.";
+            console.error("Webcam blocked:", err);
+            textOverlay.innerText = "Camera access denied.";
         });
 
         function sendFrame() {
-            // Drop interval cycle execution if client stream stalls or previous request is pending
             if (isProcessing || video.paused || video.ended) return;
+            isProcessing = true;
 
-            isProcessing = true; // Engage execution lock
-
-            // Render current mirror context snapshot straight to background memory canvas
+            // Draw and compress the video frame down to the 320x240 canvas size
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             
-            // Extract matrix data into compressed JPEG text data string
-            const frameData = canvas.toDataURL('image/jpeg', 0.4);
+            // Extract lightweight 30% quality JPEG compression payload string (~30KB - 50KB total)
+            const frameData = canvas.toDataURL('image/jpeg', 0.3); 
 
-            // POST image payload to Flask API endpoint
             fetch('/process_frame', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ image: frameData })
             })
             .then(res => {
-                if (!res.ok) throw new Error(`HTTP Error Status: ${res.status}`);
+                if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
                 return res.json();
             })
             .then(data => {
-                // Safeguard against updating the element source with empty fallback data strings
                 if (data.processed_image && data.processed_image !== "data:image/jpeg;base64,") {
                     outputImg.src = data.processed_image;
                 }
-                
-                // Update live predictive text layout
                 textOverlay.innerText = data.text ? data.text : "___";
             })
             .catch(err => {
-                console.error("Transmission skip:", err);
+                console.error("Network sync drop:", err);
             })
             .finally(() => {
-                isProcessing = false; // Disengage request system lock
+                isProcessing = false;
             });
         }
     </script>
