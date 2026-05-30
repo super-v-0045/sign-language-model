@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: signlanguage
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    plan: free
+    envVars:
+      - key: MEDIAPIPE_DISABLE_GPU
+        value: "1"

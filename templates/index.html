@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Language Detector</title>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        #video-container { position: relative; width: 100vw; height: 100dvh; display: flex; justify-content: center; align-items: center; }
+        #webcam { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        #canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); pointer-events: none; }
+        .bottom-ui { position: absolute; bottom: 0; left: 0; width: 100%; background: linear-gradient(transparent, rgba(0,0,0,0.85) 20%, #000); padding: 40px 0 20px; display: flex; flex-direction: column; align-items: center; z-index: 20; }
+        #text-overlay { color: #00FF00; font-size: 2rem; font-weight: bold; min-height: 2.5rem; letter-spacing: 4px; }
+        #current-sign { color: rgba(255,255,255,0.7); font-size: 1rem; margin-top: 4px; }
+        .controls { margin-top: 12px; display: flex; gap: 12px; }
+        button { padding: 10px 22px; border: none; border-radius: 8px; font-size: 0.95rem; cursor: pointer; font-weight: bold; }
+        #btn-clear { background: #e74c3c; color: #fff; }
+        #btn-space { background: #3498db; color: #fff; }
+        h1 { margin: 10px 0 0; font-size: 0.8rem; color: rgba(255,255,255,0.4); letter-spacing: 3px; text-transform: uppercase; }
+    </style>
+</head>
+<body>
+<div id="video-container">
+    <video id="webcam" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <div class="bottom-ui">
+        <div id="text-overlay">___</div>
+        <div id="current-sign">Loading hand detector...</div>
+        <div class="controls">
+            <button id="btn-space">Space</button>
+            <button id="btn-clear">Clear</button>
+        </div>
+        <h1>Live Sign Language Detection</h1>
+    </div>
+</div>
+
+<!-- MediaPipe Hands via CDN -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+<script>
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const textOverlay = document.getElementById('text-overlay');
+    const currentSign = document.getElementById('current-sign');
+
+    let generatedText = '';
+    let lastPrediction = null;
+    let framesHeld = 0;
+    const REQUIRED_FRAMES = 15;
+    let predicting = false;
+
+    const hands = new Hands({locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+    }});
+
+    hands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+    });
+
+    hands.onResults(async (results) => {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            for (const landmarks of results.multiHandLandmarks) {
+                drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+                drawLandmarks(ctx, landmarks, {color: '#FF0000', lineWidth: 1});
+            }
+
+            if (!predicting) {
+                predicting = true;
+                await sendLandmarks(results.multiHandLandmarks);
+                predicting = false;
+            }
+        } else {
+            currentSign.textContent = 'Show your hand...';
+            lastPrediction = null;
+            framesHeld = 0;
+        }
+    });
+
+    async function sendLandmarks(multiHandLandmarks) {
+        // Use only first hand - matches single-hand training data
+        let allLandmarks = [];
+        const hand = multiHandLandmarks[0];
+        for (const lm of hand) {
+            allLandmarks.push({x: lm.x, y: lm.y});
+        }
+
+        try {
+            const res = await fetch('/predict', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({landmarks: allLandmarks})
+            });
+            const data = await res.json();
+            const predicted = data.prediction;
+
+            if (predicted) {
+                currentSign.textContent = `Detecting: ${predicted}`;
+                if (predicted === lastPrediction) {
+                    framesHeld++;
+                } else {
+                    framesHeld = 0;
+                    lastPrediction = predicted;
+                }
+                if (framesHeld === REQUIRED_FRAMES) {
+                    generatedText += predicted;
+                    textOverlay.textContent = generatedText || '___';
+                }
+            }
+        } catch(e) {
+            console.error(e);
+        }
+    }
+
+    const camera = new Camera(video, {
+        onFrame: async () => { await hands.send({image: video}); },
+        width: 640, height: 480
+    });
+
+    camera.start().then(() => {
+        currentSign.textContent = 'Show your hand...';
+    });
+
+    document.getElementById('btn-clear').onclick = () => {
+        generatedText = '';
+        textOverlay.textContent = '___';
+        lastPrediction = null;
+        framesHeld = 0;
+    };
+    document.getElementById('btn-space').onclick = () => {
+        generatedText += ' ';
+        textOverlay.textContent = generatedText;
+    };
+</script>
+</body>
+</html>
