@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Live Sign Language Typist</title>
+    <title>Live Sign Language Typist with Hand Tracking</title>
     <style>
         * { box-sizing: border-box; }
         
@@ -40,8 +40,15 @@
             overflow: hidden;
             display: flex;
             flex-direction: column;
-            border: 2px solid #4CAF50;
+            border: 3px solid #383854; 
             box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            transition: border-color 0.21s ease-in-out, box-shadow 0.21s ease-in-out;
+        }
+
+        /* Active tracking indicator highlights layout frame border */
+        .camera-panel.detecting-active {
+            border-color: #00FF00 !important; 
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.25), 0 8px 24px rgba(0,0,0,0.4);
         }
 
         .camera-header {
@@ -56,8 +63,13 @@
         .camera-header h1 {
             margin: 0;
             font-size: 1.1rem;
-            color: #4CAF50;
+            color: #e0e0e0;
             font-weight: bold;
+            transition: color 0.2s ease;
+        }
+        
+        .camera-panel.detecting-active .camera-header h1 {
+            color: #00FF00; 
         }
 
         .video-container {
@@ -76,6 +88,18 @@
             object-fit: cover;
             display: block;
             transform: scaleX(-1);
+        }
+
+        /* Overlay canvas for drawing MediaPipe lines mirror flipped */
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1);
+            pointer-events: none;
+            z-index: 5;
         }
 
         /* Floating Live Detection Box */
@@ -200,7 +224,6 @@
             border: 1px solid #383854;
         }
 
-        /* Responsive Breakpoints */
         @media (max-width: 900px) {
             body { overflow-y: auto; padding: 12px; }
             .app-layout {
@@ -222,12 +245,13 @@
 
 <div class="app-layout">
     
-    <div class="camera-panel">
+    <div id="camPanel" class="camera-panel">
         <div class="camera-header">
             <h1>👋 Sign Language Typist</h1>
         </div>
         <div class="video-container">
             <video id="webcam" autoplay playsinline></video>
+            <canvas id="canvas"></canvas>
             <div id="live-box">
                 <div id="result">-</div>
                 <div id="hold-progress">Detecting...</div>
@@ -258,7 +282,9 @@
     </div>
 </div>
 
-<canvas id="canvas" style="display:none;"></canvas>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 
 <script type="module">
     import { client } from "https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js";
@@ -267,6 +293,7 @@
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     
+    const camPanel = document.getElementById('camPanel');
     const resultText = document.getElementById('result');
     const progressText = document.getElementById('hold-progress');
     const accumulatedTextDiv = document.getElementById('accumulated-text');
@@ -282,7 +309,6 @@
     let lastTypedLetter = "";
     const FRAMES_TO_CONFIRM = 2; 
 
-    // Button Functions linked to global context
     window.addSpace = () => { currentSentence += " "; updateTextDisplay(); };
     window.backspace = () => { currentSentence = currentSentence.slice(0, -1); updateTextDisplay(); };
     window.clearText = () => { currentSentence = ""; updateTextDisplay(); };
@@ -291,16 +317,53 @@
         accumulatedTextDiv.innerText = currentSentence || "|"; 
     }
 
-    // 1. Initialize Video Capture streams
+    // Initialize MediaPipe Engine instance
+    const handsEngine = new Hands({locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+    }});
+
+    handsEngine.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+    });
+
+    // Handle Local Skeletal Skeleton Drawing Execution
+    handsEngine.onResults((results) => {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            for (const landmarks of results.multiHandLandmarks) {
+                // Drawing options matching Code 1 layout styling values
+                drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 3});
+                drawLandmarks(ctx, landmarks, {color: '#FF0000', lineWidth: 1, radius: 4});
+            }
+        }
+    });
+
+    // Initialize video camera streams and feed it continuously into MediaPipe
     navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
-        .then(stream => { video.srcObject = stream; })
+        .then(stream => { 
+            video.srcObject = stream;
+            // Setup Camera Object loop sending frames to MediaPipe local tracker
+            const mpCamera = new Camera(video, {
+                onFrame: async () => {
+                    await handsEngine.send({image: video});
+                },
+                width: 640, height: 480
+            });
+            mpCamera.start();
+        })
         .catch(err => {
             console.error("Camera error:", err);
             statusText.innerText = "Camera Access Denied";
             statusText.style.color = "#e74c3c";
         });
 
-    // 2. Connect API pipeline endpoints
+    // Connect remote Hugging Face API pipelines
     async function connectAI() {
         try {
             hfApp = await client("superV045/sign-language-api");
@@ -313,24 +376,29 @@
         }
     }
 
-    // 3. Processing and inference cycle execution loop
+    // Prediction Processing Loop running simultaneously 
     async function predictLoop() {
         if (isPredicting || !hfApp) return;
         isPredicting = true;
 
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        // Draw offscreen static frames to process to remote AI model
+        const processingCanvas = document.createElement('canvas');
+        processingCanvas.width = video.videoWidth;
+        processingCanvas.height = video.videoHeight;
+        const pCtx = processingCanvas.getContext('2d');
+        pCtx.drawImage(video, 0, 0, processingCanvas.width, processingCanvas.height);
 
-        canvas.toBlob(async (blob) => {
+        processingCanvas.toBlob(async (blob) => {
             try {
                 const result = await hfApp.predict("/predict", [blob]);
                 const letter = result.data[0];
                 
                 resultText.innerText = letter;
 
-                // --- THE TYPING LOGIC ---
+                // --- RENDERING CONFIGURATIONS & STATE CONTROLS ---
                 if (letter !== "-") {
+                    camPanel.classList.add('detecting-active');
+
                     if (letter === currentStableLetter) {
                         letterHoldCount++;
                         
@@ -349,6 +417,8 @@
                         progressText.innerText = "Detecting...";
                     }
                 } else {
+                    camPanel.classList.remove('detecting-active');
+
                     lastTypedLetter = "";
                     currentStableLetter = "-";
                     letterHoldCount = 0;
@@ -356,7 +426,7 @@
                 }
 
             } catch (error) {
-                console.log("Prediction skipped this frame.");
+                console.log("Prediction frame capture pass skipped.");
             } finally {
                 isPredicting = false;
                 setTimeout(predictLoop, 200); 
