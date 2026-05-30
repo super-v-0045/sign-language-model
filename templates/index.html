@@ -3,143 +3,368 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sign Language Detector</title>
+    <title>Live Sign Language Typist</title>
     <style>
-        html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
-        #video-container { position: relative; width: 100vw; height: 100dvh; display: flex; justify-content: center; align-items: center; }
-        #webcam { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-        #canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); pointer-events: none; }
-        .bottom-ui { position: absolute; bottom: 0; left: 0; width: 100%; background: linear-gradient(transparent, rgba(0,0,0,0.85) 20%, #000); padding: 40px 0 20px; display: flex; flex-direction: column; align-items: center; z-index: 20; }
-        #text-overlay { color: #00FF00; font-size: 2rem; font-weight: bold; min-height: 2.5rem; letter-spacing: 4px; }
-        #current-sign { color: rgba(255,255,255,0.7); font-size: 1rem; margin-top: 4px; }
-        .controls { margin-top: 12px; display: flex; gap: 12px; }
-        button { padding: 10px 22px; border: none; border-radius: 8px; font-size: 0.95rem; cursor: pointer; font-weight: bold; }
-        #btn-clear { background: #e74c3c; color: #fff; }
-        #btn-space { background: #3498db; color: #fff; }
-        h1 { margin: 10px 0 0; font-size: 0.8rem; color: rgba(255,255,255,0.4); letter-spacing: 3px; text-transform: uppercase; }
+        * { box-sizing: border-box; }
+        
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            min-height: 100vh;
+            background: #1e1e2f;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #e0e0e0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Two-Column Layout Container */
+        .app-layout {
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            width: 100%;
+            max-width: 1200px;
+            height: 85vh;
+            min-height: 580px;
+            gap: 24px;
+            padding: 24px;
+        }
+
+        /* LEFT COLUMN: Camera Panel */
+        .camera-panel {
+            position: relative;
+            background: #2a2a40;
+            border-radius: 16px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            border: 2px solid #4CAF50;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }
+
+        .camera-header {
+            padding: 16px 20px;
+            background: #232336;
+            border-bottom: 1px solid #383854;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .camera-header h1 {
+            margin: 0;
+            font-size: 1.1rem;
+            color: #4CAF50;
+            font-weight: bold;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            flex-grow: 1;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            transform: scaleX(-1);
+        }
+
+        /* Floating Live Detection Box */
+        #live-box {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            background-color: rgba(0, 0, 0, 0.75);
+            padding: 12px 20px;
+            border-radius: 12px;
+            border: 2px solid #FFD700;
+            text-align: center;
+            backdrop-filter: blur(4px);
+            z-index: 10;
+        }
+
+        #result {
+            font-size: 3rem;
+            font-weight: bold;
+            color: #FFD700;
+            line-height: 1;
+        }
+
+        #hold-progress {
+            font-size: 0.8rem;
+            color: white;
+            margin-top: 4px;
+        }
+
+        /* RIGHT COLUMN: Controls & Output Dashboard */
+        .dashboard-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .card {
+            background: #2a2a40;
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid #383854;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+        }
+
+        .card-label {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: #aaa;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        /* Instructions Card */
+        .info-card p {
+            margin: 0;
+            color: #ccc;
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+
+        /* Main Output Box */
+        .output-card {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #accumulated-text {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: white;
+            flex-grow: 1;
+            overflow-y: auto;
+            background: #1e1e2f;
+            padding: 16px;
+            border-radius: 10px;
+            border: 1px solid #383854;
+            word-wrap: break-word;
+            letter-spacing: 2px;
+            font-family: monospace;
+        }
+
+        /* Action Controls Layout */
+        .controls {
+            display: flex;
+            gap: 12px;
+        }
+
+        button {
+            flex: 1;
+            padding: 14px;
+            font-size: 1rem;
+            font-weight: bold;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: transform 0.1s, background-color 0.2s;
+            color: white;
+        }
+
+        button:active { transform: scale(0.98); }
+
+        .btn-space { background-color: #4CAF50; }
+        .btn-space:hover { background-color: #45a049; }
+        
+        .btn-back { background-color: #f39c12; }
+        .btn-back:hover { background-color: #d68910; }
+        
+        .btn-clear { background-color: #e74c3c; }
+        .btn-clear:hover { background-color: #c0392b; }
+
+        /* System Server Status Row */
+        #status {
+            text-align: center;
+            font-size: 0.9rem;
+            color: #aaa;
+            font-weight: 500;
+            padding: 12px;
+            background: #232336;
+            border-radius: 12px;
+            border: 1px solid #383854;
+        }
+
+        /* Responsive Breakpoints */
+        @media (max-width: 900px) {
+            body { overflow-y: auto; padding: 12px; }
+            .app-layout {
+                grid-template-columns: 1fr;
+                height: auto;
+                max-height: none;
+                padding: 0;
+                gap: 16px;
+            }
+            .camera-panel { height: 400px; }
+            #accumulated-text { min-height: 120px; }
+            .controls { flex-wrap: wrap; }
+            button { flex: 1 1 40%; }
+            .btn-space { flex-basis: 100%; }
+        }
     </style>
 </head>
 <body>
-<div id="video-container">
-    <video id="webcam" autoplay playsinline muted></video>
-    <canvas id="canvas"></canvas>
-    <div class="bottom-ui">
-        <div id="text-overlay">___</div>
-        <div id="current-sign">Loading hand detector...</div>
-        <div class="controls">
-            <button id="btn-space">Space</button>
-            <button id="btn-clear">Clear</button>
+
+<div class="app-layout">
+    
+    <div class="camera-panel">
+        <div class="camera-header">
+            <h1>👋 Sign Language Typist</h1>
         </div>
-        <h1>Live Sign Language Detection</h1>
+        <div class="video-container">
+            <video id="webcam" autoplay playsinline></video>
+            <div id="live-box">
+                <div id="result">-</div>
+                <div id="hold-progress">Detecting...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard-panel">
+        
+        <div class="card info-card">
+            <div class="card-label">How to use</div>
+            <p>Hold a sign for 1 second to type it. Drop your hand down entirely to clear detection locks and type double letters!</p>
+        </div>
+
+        <div class="card output-card">
+            <div class="card-label">Your Generated Text</div>
+            <div id="accumulated-text">|</div>
+        </div>
+
+        <div class="controls">
+            <button class="btn-space" onclick="addSpace()">Space [ _ ]</button>
+            <button class="btn-back" onclick="backspace()">Backspace</button>
+            <button class="btn-clear" onclick="clearText()">Clear All</button>
+        </div>
+
+        <div id="status">Connecting to Hugging Face AI...</div>
+        
     </div>
 </div>
 
-<!-- MediaPipe Hands via CDN -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<canvas id="canvas" style="display:none;"></canvas>
 
-<script>
+<script type="module">
+    import { client } from "https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js";
+
     const video = document.getElementById('webcam');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
-    const textOverlay = document.getElementById('text-overlay');
-    const currentSign = document.getElementById('current-sign');
+    
+    const resultText = document.getElementById('result');
+    const progressText = document.getElementById('hold-progress');
+    const accumulatedTextDiv = document.getElementById('accumulated-text');
+    const statusText = document.getElementById('status');
 
-    let generatedText = '';
-    let lastPrediction = null;
-    let framesHeld = 0;
-    const REQUIRED_FRAMES = 15;
-    let predicting = false;
+    let hfApp = null; 
+    let isPredicting = false;
 
-    const hands = new Hands({locateFile: (file) => {
-        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-    }});
+    // --- Typing Logic Variables ---
+    let currentSentence = "";
+    let currentStableLetter = "-";
+    let letterHoldCount = 0;
+    let lastTypedLetter = "";
+    const FRAMES_TO_CONFIRM = 2; 
 
-    hands.setOptions({
-        maxNumHands: 2,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-    });
+    // Button Functions linked to global context
+    window.addSpace = () => { currentSentence += " "; updateTextDisplay(); };
+    window.backspace = () => { currentSentence = currentSentence.slice(0, -1); updateTextDisplay(); };
+    window.clearText = () => { currentSentence = ""; updateTextDisplay(); };
+    
+    function updateTextDisplay() {
+        accumulatedTextDiv.innerText = currentSentence || "|"; 
+    }
 
-    hands.onResults(async (results) => {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // 1. Initialize Video Capture streams
+    navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
+        .then(stream => { video.srcObject = stream; })
+        .catch(err => {
+            console.error("Camera error:", err);
+            statusText.innerText = "Camera Access Denied";
+            statusText.style.color = "#e74c3c";
+        });
 
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            for (const landmarks of results.multiHandLandmarks) {
-                drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
-                drawLandmarks(ctx, landmarks, {color: '#FF0000', lineWidth: 1});
-            }
-
-            if (!predicting) {
-                predicting = true;
-                await sendLandmarks(results.multiHandLandmarks);
-                predicting = false;
-            }
-        } else {
-            currentSign.textContent = 'Show your hand...';
-            lastPrediction = null;
-            framesHeld = 0;
-        }
-    });
-
-    async function sendLandmarks(multiHandLandmarks) {
-        // Use only first hand - matches single-hand training data
-        let allLandmarks = [];
-        const hand = multiHandLandmarks[0];
-        for (const lm of hand) {
-            allLandmarks.push({x: lm.x, y: lm.y});
-        }
-
+    // 2. Connect API pipeline endpoints
+    async function connectAI() {
         try {
-            const res = await fetch('/predict', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({landmarks: allLandmarks})
-            });
-            const data = await res.json();
-            const predicted = data.prediction;
-
-            if (predicted) {
-                currentSign.textContent = `Detecting: ${predicted}`;
-                if (predicted === lastPrediction) {
-                    framesHeld++;
-                } else {
-                    framesHeld = 0;
-                    lastPrediction = predicted;
-                }
-                if (framesHeld === REQUIRED_FRAMES) {
-                    generatedText += predicted;
-                    textOverlay.textContent = generatedText || '___';
-                }
-            }
-        } catch(e) {
-            console.error(e);
+            hfApp = await client("superV045/sign-language-api");
+            statusText.innerText = "AI Connected! Start signing.";
+            statusText.style.color = "#4CAF50";
+            predictLoop();
+        } catch (error) {
+            statusText.innerText = "Failed to connect to AI. Refresh the page.";
+            statusText.style.color = "#e74c3c";
         }
     }
 
-    const camera = new Camera(video, {
-        onFrame: async () => { await hands.send({image: video}); },
-        width: 640, height: 480
-    });
+    // 3. Processing and inference cycle execution loop
+    async function predictLoop() {
+        if (isPredicting || !hfApp) return;
+        isPredicting = true;
 
-    camera.start().then(() => {
-        currentSign.textContent = 'Show your hand...';
-    });
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    document.getElementById('btn-clear').onclick = () => {
-        generatedText = '';
-        textOverlay.textContent = '___';
-        lastPrediction = null;
-        framesHeld = 0;
-    };
-    document.getElementById('btn-space').onclick = () => {
-        generatedText += ' ';
-        textOverlay.textContent = generatedText;
-    };
+        canvas.toBlob(async (blob) => {
+            try {
+                const result = await hfApp.predict("/predict", [blob]);
+                const letter = result.data[0];
+                
+                resultText.innerText = letter;
+
+                // --- THE TYPING LOGIC ---
+                if (letter !== "-") {
+                    if (letter === currentStableLetter) {
+                        letterHoldCount++;
+                        
+                        let dots = ".".repeat(letterHoldCount % 4);
+                        progressText.innerText = `Holding${dots}`;
+
+                        if (letterHoldCount === FRAMES_TO_CONFIRM && letter !== lastTypedLetter) {
+                            currentSentence += letter;
+                            updateTextDisplay();
+                            lastTypedLetter = letter; 
+                            progressText.innerText = "Added!";
+                        }
+                    } else {
+                        currentStableLetter = letter;
+                        letterHoldCount = 1;
+                        progressText.innerText = "Detecting...";
+                    }
+                } else {
+                    lastTypedLetter = "";
+                    currentStableLetter = "-";
+                    letterHoldCount = 0;
+                    progressText.innerText = "Waiting for hand...";
+                }
+
+            } catch (error) {
+                console.log("Prediction skipped this frame.");
+            } finally {
+                isPredicting = false;
+                setTimeout(predictLoop, 200); 
+            }
+        }, 'image/jpeg');
+    }
+
+    connectAI();
 </script>
 </body>
 </html>
