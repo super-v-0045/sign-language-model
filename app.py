@@ -5,8 +5,16 @@ from flask_cors import CORS
 import os
 
 app = Flask(__name__)
-CORS(app)
 
+# Configured to allow cross-origin requests securely from your Render deployment
+CORS(app, resources={
+    r"/*": {
+        "origins": ["https://sign-language-model-fbyr.onrender.com"],
+        "supports_credentials": True
+    }
+})
+
+# Load your classification model
 model_dict = pickle.load(open('model.p', 'rb'))
 model = model_dict['model']
 
@@ -23,20 +31,29 @@ def predict():
         if not data or 'landmarks' not in data:
             return jsonify({'error': 'No landmarks provided'}), 400
 
-        landmarks = data['landmarks']  # list of {x, y} objects
+        landmarks = data['landmarks']  # Array of {x, y, (optional z)} from frontend
         
         data_aux = []
-        x_ = [lm['x'] for lm in landmarks]
-        y_ = [lm['y'] for lm in landmarks]
-        for lm in landmarks:
-            data_aux.append(lm['x'] - min(x_))
-            data_aux.append(lm['y'] - min(y_))
+        # Safely extract x and y coordinates, ignoring z if present
+        x_ = [lm['x'] for lm in landmarks if 'x' in lm]
+        y_ = [lm['y'] for lm in landmarks if 'y' in lm]
+        
+        if not x_ or not y_:
+            return jsonify({'error': 'Malformed landmarks dataset'}), 400
 
+        # Relative coordinate normalisation against bounding box minimums
+        for lm in landmarks:
+            if 'x' in lm and 'y' in lm:
+                data_aux.append(lm['x'] - min(x_))
+                data_aux.append(lm['y'] - min(y_))
+
+        # Enforce structural matching to MAX_LEN requirement expected by your model
         if len(data_aux) < MAX_LEN:
             data_aux.extend([0.0] * (MAX_LEN - len(data_aux)))
         else:
             data_aux = data_aux[:MAX_LEN]
 
+        # Machine Learning Inference pass
         prediction = model.predict([np.asarray(data_aux)])
         return jsonify({'prediction': str(prediction[0])})
 
