@@ -287,8 +287,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 
 <script type="module">
-    import { client } from "https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js";
-
     const video = document.getElementById('webcam');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
@@ -299,8 +297,9 @@
     const accumulatedTextDiv = document.getElementById('accumulated-text');
     const statusText = document.getElementById('status');
 
-    let hfApp = null; 
     let isPredicting = false;
+    // Store the latest detected landmarks globally so the prediction loop can read them
+    let latestLandmarks = null; 
 
     // --- Typing Logic Variables ---
     let currentSentence = "";
@@ -336,11 +335,15 @@
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            // Save the coordinates to send to your Flask backend
+            latestLandmarks = results.multiHandLandmarks[0]; 
+            
             for (const landmarks of results.multiHandLandmarks) {
-                // Drawing options matching Code 1 layout styling values
                 drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 3});
                 drawLandmarks(ctx, landmarks, {color: '#FF0000', lineWidth: 1, radius: 4});
             }
+        } else {
+            latestLandmarks = null; // No hand in frame
         }
     });
 
@@ -348,7 +351,6 @@
     navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
         .then(stream => { 
             video.srcObject = stream;
-            // Setup Camera Object loop sending frames to MediaPipe local tracker
             const mpCamera = new Camera(video, {
                 onFrame: async () => {
                     await handsEngine.send({image: video});
@@ -356,6 +358,11 @@
                 width: 640, height: 480
             });
             mpCamera.start();
+            
+            // Start the backend prediction loop once camera is live
+            statusText.innerText = "System ready. Start signing!";
+            statusText.style.color = "#4CAF50";
+            predictLoop();
         })
         .catch(err => {
             console.error("Camera error:", err);
@@ -363,49 +370,53 @@
             statusText.style.color = "#e74c3c";
         });
 
-    // Connect remote Hugging Face API pipelines
-    async function connectAI() {
-        try {
-            hfApp = await client("superV045/sign-language-api");
-            statusText.innerText = "AI Connected! Start signing.";
-            statusText.style.color = "#4CAF50";
-            predictLoop();
-        } catch (error) {
-            statusText.innerText = "Failed to connect to AI. Refresh the page.";
-            statusText.style.color = "#e74c3c";
-        }
-    }
-
-    // Prediction Processing Loop running simultaneously 
+    // Direct HTTP Request loop targeting your Flask endpoint
     async function predictLoop() {
-        if (isPredicting || !hfApp) return;
+        if (isPredicting) return;
+        
+        // If there are no landmarks detected by MediaPipe, clear states and skip the backend call
+        if (!latestLandmarks) {
+            camPanel.classList.remove('detecting-active');
+            resultText.innerText = "-";
+            progressText.innerText = "Waiting for hand...";
+            lastTypedLetter = "";
+            currentStableLetter = "-";
+            letterHoldCount = 0;
+            
+            setTimeout(predictLoop, 200);
+            return;
+        }
+
         isPredicting = true;
 
-        // Draw offscreen static frames to process to remote AI model
-        const processingCanvas = document.createElement('canvas');
-        processingCanvas.width = video.videoWidth;
-        processingCanvas.height = video.videoHeight;
-        const pCtx = processingCanvas.getContext('2d');
-        pCtx.drawImage(video, 0, 0, processingCanvas.width, processingCanvas.height);
+        try {
+            // Replace this URL with your active backend endpoint (Hugging Face space or Render backend)
+            const BACKEND_URL = "https://superv045-sign-language-api.hf.space/predict";
 
-        processingCanvas.toBlob(async (blob) => {
-            try {
-                const result = await hfApp.predict("/predict", [blob]);
-                const letter = result.data[0];
-                
+            const response = await fetch(BACKEND_URL, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ landmarks: latestLandmarks }),
+                credentials: "omit" // Bypasses the strict browser CORS credential block
+            });
+
+            const result = await response.json();
+            
+            if (result.prediction) {
+                const letter = result.prediction;
                 resultText.innerText = letter;
 
-                // --- RENDERING CONFIGURATIONS & STATE CONTROLS ---
                 if (letter !== "-") {
                     camPanel.classList.add('detecting-active');
 
                     if (letter === currentStableLetter) {
                         letterHoldCount++;
-                        
                         let dots = ".".repeat(letterHoldCount % 4);
                         progressText.innerText = `Holding${dots}`;
 
-                        if (letterHoldCount === FRAMES_TO_CONFIRM && letter !== lastTypedLetter) {
+                        if (letterHoldCount >= FRAMES_TO_CONFIRM && letter !== lastTypedLetter) {
                             currentSentence += letter;
                             updateTextDisplay();
                             lastTypedLetter = letter; 
@@ -416,25 +427,13 @@
                         letterHoldCount = 1;
                         progressText.innerText = "Detecting...";
                     }
-                } else {
-                    camPanel.classList.remove('detecting-active');
-
-                    lastTypedLetter = "";
-                    currentStableLetter = "-";
-                    letterHoldCount = 0;
-                    progressText.innerText = "Waiting for hand...";
                 }
-
-            } catch (error) {
-                console.log("Prediction frame capture pass skipped.");
-            } finally {
-                isPredicting = false;
-                setTimeout(predictLoop, 200); 
             }
-        }, 'image/jpeg');
+        } catch (error) {
+            console.error("Prediction loop connection error:", error);
+        } finally {
+            isPredicting = false;
+            setTimeout(predictLoop, 300); // Polls backend every 300ms
+        }
     }
-
-    connectAI();
 </script>
-</body>
-</html>
