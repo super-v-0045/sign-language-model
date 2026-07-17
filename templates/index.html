@@ -3,94 +3,67 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Live Sign Language Typist with Hand Tracking</title>
+    <title>Sign Language Typist</title>
     <style>
         * { box-sizing: border-box; }
-        
-        body {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            min-height: 100vh;
-            background: #1e1e2f;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            color: #e0e0e0;
+        body { 
+            margin: 0; 
+            padding: 0; 
+            width: 100vw; 
+            height: 100vh; 
+            background-color: #1e1e28; 
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; 
             display: flex;
-            align-items: center;
             justify-content: center;
+            align-items: center;
+            color: #fff;
         }
 
-        /* Two-Column Layout Container */
-        .app-layout {
-            display: grid;
-            grid-template-columns: 1.2fr 1fr;
-            width: 100%;
-            max-width: 1200px;
-            height: 85vh;
-            min-height: 580px;
+        .dashboard-container {
+            display: flex;
             gap: 24px;
-            padding: 24px;
+            width: 90%;
+            max-width: 1200px;
+            align-items: flex-start;
         }
 
-        /* LEFT COLUMN: Camera Panel */
-        .camera-panel {
-            position: relative;
-            background: #2a2a40;
-            border-radius: 16px;
+        /* Left Side Card - Video Viewport */
+        .card-left {
+            flex: 1.1;
+            background-color: #252538;
+            border-radius: 12px;
+            border: 1px solid #33334d;
             overflow: hidden;
             display: flex;
             flex-direction: column;
-            border: 3px solid #383854; 
-            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-            transition: border-color 0.21s ease-in-out, box-shadow 0.21s ease-in-out;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
         }
 
-        /* Active tracking indicator highlights layout frame border */
-        .camera-panel.detecting-active {
-            border-color: #00FF00 !important; 
-            box-shadow: 0 0 20px rgba(0, 255, 0, 0.25), 0 8px 24px rgba(0,0,0,0.4);
-        }
-
-        .camera-header {
-            padding: 16px 20px;
-            background: #232336;
-            border-bottom: 1px solid #383854;
+        .card-header {
+            padding: 16px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            gap: 8px;
+            border-bottom: 1px solid #33334d;
         }
 
-        .camera-header h1 {
-            margin: 0;
-            font-size: 1.1rem;
-            color: #e0e0e0;
-            font-weight: bold;
-            transition: color 0.2s ease;
-        }
-        
-        .camera-panel.detecting-active .camera-header h1 {
-            color: #00FF00; 
-        }
-
-        .video-container {
+        .video-wrapper {
             position: relative;
             width: 100%;
-            flex-grow: 1;
+            aspect-ratio: 4 / 3;
             background: #000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
         }
 
-        video {
+        #webcam {
             width: 100%;
             height: 100%;
             object-fit: cover;
-            display: block;
             transform: scaleX(-1);
         }
 
-        /* Overlay canvas for drawing MediaPipe lines mirror flipped */
         #canvas {
             position: absolute;
             top: 0;
@@ -99,341 +72,286 @@
             height: 100%;
             transform: scaleX(-1);
             pointer-events: none;
-            z-index: 5;
         }
 
-        /* Floating Live Detection Box */
-        #live-box {
+        /* Floating Status Card Overlay */
+        .status-overlay {
             position: absolute;
             top: 16px;
             right: 16px;
-            background-color: rgba(0, 0, 0, 0.75);
-            padding: 12px 20px;
-            border-radius: 12px;
-            border: 2px solid #FFD700;
-            text-align: center;
-            backdrop-filter: blur(4px);
+            background-color: rgba(22, 22, 30, 0.9);
+            border: 2px solid #f1c40f;
+            border-radius: 10px;
+            width: 110px;
+            height: 70px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
             z-index: 10;
         }
 
-        #result {
-            font-size: 3rem;
+        #predicted-char {
+            color: #f1c40f;
+            font-size: 1.5rem;
             font-weight: bold;
-            color: #FFD700;
             line-height: 1;
+            margin-bottom: 4px;
         }
 
-        #hold-progress {
-            font-size: 0.8rem;
-            color: white;
-            margin-top: 4px;
-        }
-
-        /* RIGHT COLUMN: Controls & Output Dashboard */
-        .dashboard-panel {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-
-        .card {
-            background: #2a2a40;
-            border-radius: 16px;
-            padding: 24px;
-            border: 1px solid #383854;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.2);
-        }
-
-        .card-label {
-            font-size: 0.8rem;
+        .status-text {
+            color: rgba(255,255,255,0.8);
+            font-size: 0.65rem;
             text-transform: uppercase;
-            letter-spacing: 1.5px;
-            color: #aaa;
-            margin-bottom: 10px;
-            font-weight: 600;
+            letter-spacing: 0.5px;
         }
 
-        /* Instructions Card */
-        .info-card p {
-            margin: 0;
-            color: #ccc;
-            font-size: 0.95rem;
-            line-height: 1.5;
-        }
-
-        /* Main Output Box */
-        .output-card {
-            flex-grow: 1;
+        /* Right Side Card - Typist & Controls */
+        .card-right {
+            flex: 0.9;
             display: flex;
             flex-direction: column;
+            gap: 16px;
         }
 
-        #accumulated-text {
-            font-size: 2.5rem;
+        .text-panel {
+            background-color: #252538;
+            border-radius: 12px;
+            border: 1px solid #33334d;
+            padding: 24px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .panel-label {
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 0.75rem;
             font-weight: bold;
-            color: white;
-            flex-grow: 1;
-            overflow-y: auto;
-            background: #1e1e2f;
-            padding: 16px;
-            border-radius: 10px;
-            border: 1px solid #383854;
-            word-wrap: break-word;
-            letter-spacing: 2px;
-            font-family: monospace;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            margin-bottom: 12px;
         }
 
-        /* Action Controls Layout */
-        .controls {
+        .text-output-box {
+            width: 100%;
+            height: 240px;
+            background-color: #1a1a26;
+            border-radius: 8px;
+            border: 1px solid #2e2e42;
+            padding: 16px;
+            color: #ffffff;
+            font-size: 1.8rem;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        /* Custom Blinking Caret Simulation */
+        .text-output-box::after {
+            content: '|';
+            animation: blink 1s step-end infinite;
+            color: #fff;
+            margin-left: 2px;
+        }
+
+        @keyframes blink {
+            from, to { color: transparent }
+            50% { color: #fff; }
+        }
+
+        .controls-row {
             display: flex;
             gap: 12px;
+            width: 100%;
         }
 
-        button {
+        .btn {
             flex: 1;
-            padding: 14px;
-            font-size: 1rem;
-            font-weight: bold;
+            padding: 14px 0;
             border: none;
-            border-radius: 12px;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: bold;
+            color: #fff;
             cursor: pointer;
-            transition: transform 0.1s, background-color 0.2s;
-            color: white;
+            transition: opacity 0.2s;
         }
 
-        button:active { transform: scale(0.98); }
+        .btn:hover { opacity: 0.9; }
+        #btn-space { background-color: #4caf50; }
+        #btn-backspace { background-color: #f39c12; }
+        #btn-clear { background-color: #e74c3c; }
 
-        .btn-space { background-color: #4CAF50; }
-        .btn-space:hover { background-color: #45a049; }
-        
-        .btn-back { background-color: #f39c12; }
-        .btn-back:hover { background-color: #d68910; }
-        
-        .btn-clear { background-color: #e74c3c; }
-        .btn-clear:hover { background-color: #c0392b; }
-
-        /* System Server Status Row */
-        #status {
-            text-align: center;
-            font-size: 0.9rem;
-            color: #aaa;
-            font-weight: 500;
+        .system-status-bar {
+            background-color: #252538;
+            border-radius: 8px;
+            border: 1px solid #33334d;
             padding: 12px;
-            background: #232336;
-            border-radius: 12px;
-            border: 1px solid #383854;
-        }
-
-        @media (max-width: 900px) {
-            body { overflow-y: auto; padding: 12px; }
-            .app-layout {
-                grid-template-columns: 1fr;
-                height: auto;
-                max-height: none;
-                padding: 0;
-                gap: 16px;
-            }
-            .camera-panel { height: 400px; }
-            #accumulated-text { min-height: 120px; }
-            .controls { flex-wrap: wrap; }
-            button { flex: 1 1 40%; }
-            .btn-space { flex-basis: 100%; }
+            text-align: center;
+            font-size: 0.85rem;
+            color: #2ecc71;
+            font-weight: 500;
         }
     </style>
 </head>
 <body>
 
-<div class="app-layout">
-    
-    <div id="camPanel" class="camera-panel">
-        <div class="camera-header">
-            <h1>👋 Sign Language Typist</h1>
+<div class="dashboard-container">
+    <!-- Camera Viewport Card -->
+    <div class="card-left">
+        <div class="card-header">
+            <span>👋</span> Sign Language Typist
         </div>
-        <div class="video-container">
-            <video id="webcam" autoplay playsinline></video>
+        <div class="video-wrapper">
+            <video id="webcam" autoplay playsinline muted></video>
             <canvas id="canvas"></canvas>
-            <div id="live-box">
-                <div id="result">-</div>
-                <div id="hold-progress">Detecting...</div>
+            
+            <div class="status-overlay">
+                <div id="predicted-char">-</div>
+                <div class="status-text" id="status-label">Waiting hand...</div>
             </div>
         </div>
     </div>
 
-    <div class="dashboard-panel">
-        <!-- 
-        <div class="card info-card">
-            <div class="card-label">How to use</div>
-            <p>Hold a sign for 1 second to type it. Drop your hand down entirely to clear detection locks and type double letters!</p>
-        </div> -->
-
-        <div class="card output-card">
-            <div class="card-label">Your Generated Text</div>
-            <div id="accumulated-text">|</div>
+    <!-- Interface Panel & Actions Card -->
+    <div class="card-right">
+        <div class="text-panel">
+            <div class="panel-label">Your Generated Text</div>
+            <div class="text-output-box" id="text-overlay"></div>
         </div>
 
-        <div class="controls">
-            <button class="btn-space" onclick="addSpace()">Space [ _ ]</button>
-            <button class="btn-back" onclick="backspace()">Backspace</button>
-            <button class="btn-clear" onclick="clearText()">Clear All</button>
+        <div class="controls-row">
+            <button class="btn" id="btn-space">Space [ _ ]</button>
+            <button class="btn" id="btn-backspace">Backspace</button>
+            <button class="btn" id="btn-clear">Clear All</button>
         </div>
 
-        <div id="status">Connecting to Hugging Face AI...</div>
-        
+        <div class="system-status-bar" id="system-status">
+            System ready. Start signing!
+        </div>
     </div>
 </div>
 
+<!-- MediaPipe Hands via CDN -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 
-<script type="module">
+<script>
     const video = document.getElementById('webcam');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
-    
-    const camPanel = document.getElementById('camPanel');
-    const resultText = document.getElementById('result');
-    const progressText = document.getElementById('hold-progress');
-    const accumulatedTextDiv = document.getElementById('accumulated-text');
-    const statusText = document.getElementById('status');
+    const textOverlay = document.getElementById('text-overlay');
+    const predictedChar = document.getElementById('predicted-char');
+    const statusLabel = document.getElementById('status-label');
+    const systemStatus = document.getElementById('system-status');
 
-    let isPredicting = false;
-    // Store the latest detected landmarks globally so the prediction loop can read them
-    let latestLandmarks = null; 
+    let generatedText = '';
+    let lastPrediction = null;
+    let framesHeld = 0;
+    const REQUIRED_FRAMES = 15;
+    let predicting = false;
 
-    // --- Typing Logic Variables ---
-    let currentSentence = "";
-    let currentStableLetter = "-";
-    let letterHoldCount = 0;
-    let lastTypedLetter = "";
-    const FRAMES_TO_CONFIRM = 2; 
-
-    window.addSpace = () => { currentSentence += " "; updateTextDisplay(); };
-    window.backspace = () => { currentSentence = currentSentence.slice(0, -1); updateTextDisplay(); };
-    window.clearText = () => { currentSentence = ""; updateTextDisplay(); };
-    
-    function updateTextDisplay() {
-        accumulatedTextDiv.innerText = currentSentence || "|"; 
-    }
-
-    // Initialize MediaPipe Engine instance
-    const handsEngine = new Hands({locateFile: (file) => {
+    const hands = new Hands({locateFile: (file) => {
         return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
     }});
 
-    handsEngine.setOptions({
-        maxNumHands: 1,
+    hands.setOptions({
+        maxNumHands: 2,
         modelComplexity: 1,
         minDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5
     });
 
-    // Handle Local Skeletal Skeleton Drawing Execution
-    handsEngine.onResults((results) => {
+    hands.onResults(async (results) => {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            // Save the coordinates to send to your Flask backend
-            latestLandmarks = results.multiHandLandmarks[0]; 
-            
             for (const landmarks of results.multiHandLandmarks) {
-                drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 3});
-                drawLandmarks(ctx, landmarks, {color: '#FF0000', lineWidth: 1, radius: 4});
+                drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+                drawLandmarks(ctx, landmarks, {color: '#FF0000', lineWidth: 1});
+            }
+
+            statusLabel.textContent = 'Detecting...';
+
+            if (!predicting) {
+                predicting = true;
+                await sendLandmarks(results.multiHandLandmarks);
+                predicting = false;
             }
         } else {
-            latestLandmarks = null; // No hand in frame
+            predictedChar.textContent = '-';
+            statusLabel.textContent = 'Waiting hand...';
+            lastPrediction = null;
+            framesHeld = 0;
         }
     });
 
-    // Initialize video camera streams and feed it continuously into MediaPipe
-    navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
-        .then(stream => { 
-            video.srcObject = stream;
-            const mpCamera = new Camera(video, {
-                onFrame: async () => {
-                    await handsEngine.send({image: video});
-                },
-                width: 640, height: 480
-            });
-            mpCamera.start();
-            
-            // Start the backend prediction loop once camera is live
-            statusText.innerText = "System ready. Start signing!";
-            statusText.style.color = "#4CAF50";
-            predictLoop();
-        })
-        .catch(err => {
-            console.error("Camera error:", err);
-            statusText.innerText = "Camera Access Denied";
-            statusText.style.color = "#e74c3c";
-        });
-
-    // Direct HTTP Request loop targeting your Flask endpoint
-    async function predictLoop() {
-        if (isPredicting) return;
-        
-        // If there are no landmarks detected by MediaPipe, clear states and skip the backend call
-        if (!latestLandmarks) {
-            camPanel.classList.remove('detecting-active');
-            resultText.innerText = "-";
-            progressText.innerText = "Waiting for hand...";
-            lastTypedLetter = "";
-            currentStableLetter = "-";
-            letterHoldCount = 0;
-            
-            setTimeout(predictLoop, 200);
-            return;
+    async function sendLandmarks(multiHandLandmarks) {
+        let allLandmarks = [];
+        const hand = multiHandLandmarks[0];
+        for (const lm of hand) {
+            allLandmarks.push({x: lm.x, y: lm.y});
         }
-
-        isPredicting = true;
 
         try {
-            // Replace this URL with your active backend endpoint (Hugging Face space or Render backend)
-            const BACKEND_URL = "https://superv045-sign-language-api.hf.space/predict";
-
-            const response = await fetch(BACKEND_URL, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({ landmarks: latestLandmarks }),
-                credentials: "omit" // Bypasses the strict browser CORS credential block
+            const res = await fetch('/predict', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({landmarks: allLandmarks})
             });
+            const data = await res.json();
+            const predicted = data.prediction;
 
-            const result = await response.json();
-            
-            if (result.prediction) {
-                const letter = result.prediction;
-                resultText.innerText = letter;
-
-                if (letter !== "-") {
-                    camPanel.classList.add('detecting-active');
-
-                    if (letter === currentStableLetter) {
-                        letterHoldCount++;
-                        let dots = ".".repeat(letterHoldCount % 4);
-                        progressText.innerText = `Holding${dots}`;
-
-                        if (letterHoldCount >= FRAMES_TO_CONFIRM && letter !== lastTypedLetter) {
-                            currentSentence += letter;
-                            updateTextDisplay();
-                            lastTypedLetter = letter; 
-                            progressText.innerText = "Added!";
-                        }
-                    } else {
-                        currentStableLetter = letter;
-                        letterHoldCount = 1;
-                        progressText.innerText = "Detecting...";
-                    }
+            if (predicted) {
+                predictedChar.textContent = predicted;
+                if (predicted === lastPrediction) {
+                    framesHeld++;
+                } else {
+                    framesHeld = 0;
+                    lastPrediction = predicted;
+                }
+                if (framesHeld === REQUIRED_FRAMES) {
+                    generatedText += predicted;
+                    textOverlay.textContent = generatedText;
                 }
             }
-        } catch (error) {
-            console.error("Prediction loop connection error:", error);
-        } finally {
-            isPredicting = false;
-            setTimeout(predictLoop, 300); // Polls backend every 300ms
+        } catch(e) {
+            console.error(e);
         }
     }
+
+    const camera = new Camera(video, {
+        onFrame: async () => { await hands.send({image: video}); },
+        width: 640, height: 480
+    });
+
+    camera.start().then(() => {
+        systemStatus.textContent = "System ready. Start signing!";
+    });
+
+    // Control Actions
+    document.getElementById('btn-clear').onclick = () => {
+        generatedText = '';
+        textOverlay.textContent = '';
+        lastPrediction = null;
+        framesHeld = 0;
+    };
+
+    document.getElementById('btn-space').onclick = () => {
+        generatedText += ' ';
+        textOverlay.textContent = generatedText;
+    };
+
+    document.getElementById('btn-backspace').onclick = () => {
+        if (generatedText.length > 0) {
+            generatedText = generatedText.slice(0, -1);
+            textOverlay.textContent = generatedText;
+        }
+    };
 </script>
+</body>
+</html>
